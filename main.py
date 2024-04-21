@@ -17,8 +17,8 @@ st.set_page_config(
 
 # Define the scope and Spotify OAuth
 scope = 'user-library-read playlist-read-private'
-oauth = SpotifyOAuth(client_id='be97c21b03a447c182d57288acf12856',
-                     client_secret='f04382d3507a42559b4e3d556cc9091d',
+oauth = SpotifyOAuth(client_id='2877d0f23f464b5c83091d732c782225',
+                     client_secret='e1e564854e3e45bc86423b7d373d4011',
                      redirect_uri='http://localhost:8501',
                      scope=scope,
                      show_dialog=True,
