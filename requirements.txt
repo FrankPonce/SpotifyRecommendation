@@ -1,5 +1,5 @@
 spotipy
-PIL
+Pillow
 folium
 streamlit-folium
 googlemaps
