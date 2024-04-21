@@ -1,0 +1,6 @@
+spotipy
+PIL
+folium
+streamlit-folium
+googlemaps
+musicbrainzngs
