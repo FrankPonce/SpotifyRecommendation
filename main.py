@@ -5,10 +5,8 @@ import pandas as pd
 from collections import Counter
 from PIL import Image
 import folium
-import time
 from streamlit_folium import st_folium, folium_static
 import googlemaps
-from datetime import datetime
 import musicbrainzngs
 
 st.set_page_config(
