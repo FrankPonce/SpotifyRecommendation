@@ -1,49 +1,105 @@
+import warnings
+warnings.filterwarnings("ignore")
+
+import os
+os.environ['PYTHONWARNINGS'] = 'ignore'
+
+import logging
+logging.getLogger("root").setLevel(logging.ERROR)
+
 import streamlit as st
-import spotipy
-from spotipy.oauth2 import SpotifyOAuth, SpotifyOauthError
-import pandas as pd
-from collections import Counter
-from PIL import Image
-import folium
-from streamlit_folium import st_folium, folium_static
-import googlemaps
-import musicbrainzngs
+st.set_option('deprecation.showPyplotGlobalUse', False)
 
 st.set_page_config(
-    page_title="Spotify Analyzer",
+    page_title="Spotify Playlist Analyzer",
     page_icon="favicon.png",
     layout="wide"
 )
 
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()  # Load variables from a .env file
+
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth, SpotifyOauthError
+import pandas as pd
+from collections import Counter
+from PIL import Image, ImageOps, ImageDraw, ImageFilter
+import folium
+from streamlit_folium import st_folium
+import googlemaps
+import musicbrainzngs
+
 # Define the scope and Spotify OAuth
 scope = 'user-library-read playlist-read-private'
-oauth = SpotifyOAuth(client_id='2877d0f23f464b5c83091d732c782225',
-                     client_secret='e1e564854e3e45bc86423b7d373d4011',
-                     redirect_uri='http://localhost:8501',
-                     scope=scope,
-                     show_dialog=True,
-                     cache_path='token.txt')
 
-gmaps = googlemaps.Client(key='AIzaSyBWQDKHu7qGqy35uvNlbR8rjHHpsejIXo4')
-musicbrainzngs.set_useragent("SpotfyAnalyzer", "0.1", "fmedi027@fiu.edu")
+client_id = os.getenv('SPOTIPY_CLIENT_ID')
+client_secret = os.getenv('SPOTIPY_CLIENT_SECRET')
+redirect_uri = os.getenv('SPOTIPY_REDIRECT_URI')
 
+oauth = SpotifyOAuth(
+    client_id=client_id,
+    client_secret=client_secret,
+    redirect_uri=redirect_uri,
+    scope=scope,
+    show_dialog=True,
+    cache_path='token.txt'
+)
+
+# Initialize Google Maps and MusicBrainz clients
+gmaps_api_key = os.getenv('GMAPS_API_KEY')
+gmaps = googlemaps.Client(key=gmaps_api_key)
+musicbrainzngs.set_useragent("SpotifyAnalyzer", "0.1", "your_email@example.com")
+
+@st.cache_data
 def get_recommendations(seed_tracks, num_tracks):
     sp = spotipy.Spotify(auth_manager=oauth)
     recommendations = sp.recommendations(seed_tracks=seed_tracks, limit=num_tracks)
     return [track['name'] + ' - ' + track['artists'][0]['name'] for track in recommendations['tracks']]
 
+def make_vinyl_image(img):
+    # Resize the image to a square
+    min_dim = min(img.size)
+    try:
+        resample_method = Image.Resampling.LANCZOS  # For Pillow >=9.1.0
+    except AttributeError:
+        resample_method = Image.LANCZOS  # For older versions
 
+    img = img.resize((min_dim, min_dim), resample=resample_method)
+
+    # Create circular mask
+    mask = Image.new('L', img.size, 0)
+    draw = ImageDraw.Draw(mask)
+    draw.ellipse((0, 0) + img.size, fill=255)
+
+    # Apply mask to create a circular image
+    circular_img = ImageOps.fit(img, mask.size, centering=(0.5, 0.5))
+    circular_img.putalpha(mask)
+
+    # Create a black background (vinyl record)
+    background = Image.new('RGBA', img.size, (0, 0, 0, 255))
+
+    # Draw grooves on the vinyl record
+    draw = ImageDraw.Draw(background)
+    center = (img.size[0] // 2, img.size[1] // 2)
+    max_radius = img.size[0] // 2
+    for r in range(max_radius, 0, -10):
+        draw.ellipse([
+            center[0] - r, center[1] - r,
+            center[0] + r, center[1] + r
+        ], outline=(40, 40, 40, 255))
+
+    # Paste the circular image onto the vinyl background
+    background.paste(circular_img, (0, 0), circular_img)
+
+    return background
 
 def main():
-
-    st.title("Spotify Playlist Analyzer")
-
     # Handle authentication
     token_info = oauth.get_cached_token()
     if not token_info:
-        url = st.query_params
+        url = st.experimental_get_query_params()
         if 'code' not in st.session_state:
-            url = st.experimental_get_query_params()
             if 'code' in url:
                 st.session_state['code'] = url['code'][0]  # Save code to session state to prevent reuse issues
 
@@ -59,50 +115,60 @@ def main():
                 return
         else:
             auth_url = oauth.get_authorize_url()
+            st.title("Spotify Playlist Analyzer")
+            st.info("To test this app, you can login with the login and password: spotifyrectest@gmail.com")
             if st.button('Login with Spotify'):
-                st.markdown(f'Please log in [here]({auth_url}).', unsafe_allow_html=True)
-                st.write('After logging in, please press "Rerun" or refresh the page.')
+                st.write(f'<meta http-equiv="refresh" content="0; url={auth_url}">', unsafe_allow_html=True)
+                st.stop()
+            st.stop()
 
     if token_info:
-
         sp = spotipy.Spotify(auth=token_info['access_token'])
         st.success('Logged in with Spotify')
 
-        # Fetch and display user's playlists in a select box
-        playlists = sp.current_user_playlists(limit=50)
+        if st.button('Logout'):
+            if os.path.exists('token.txt'):
+                os.remove('token.txt')
+            st.success('Logged out successfully. Please refresh the page to log in again.')
+            st.stop()
+
+        # Fetch playlists once
+        try:
+            playlists = get_playlists(_sp=sp)
+        except spotipy.exceptions.SpotifyException as e:
+            st.error(f"Failed to fetch playlists: {e}")
+            st.stop()
+
         playlist_names = [playlist['name'] for playlist in playlists['items']]
         playlist_ids = [playlist['id'] for playlist in playlists['items']]
         playlist_selection = st.selectbox('Select a Playlist', playlist_names, key='playlist_select')
 
         # Get the selected playlist ID and fetch tracks
         selected_playlist_id = playlist_ids[playlist_names.index(playlist_selection)]
-        tracks = sp.playlist_tracks(selected_playlist_id)
+        tracks = get_playlist_tracks(_sp=sp, playlist_id=selected_playlist_id)
+        track_ids = [item['track']['id'] for item in tracks['items'] if item['track']['id']]
+        artist_ids = {item['track']['artists'][0]['id'] for item in tracks['items'] if item['track']['artists']}
+        artists_data = get_artist_data(_sp=sp, artist_ids=artist_ids)
+        audio_features_list = get_audio_features(_sp=sp, track_ids=track_ids)
 
         # Display tracks in the playlist
         with st.sidebar:
-            col1, col2= st.columns(2)
+            col1, col2 = st.columns(2)
             with col2:
                 st.markdown(":green[Powered by:]")
-
             st.image('logo.png', use_column_width=True)
             st.subheader(f"Tracks in {playlist_selection}:")
             for i, item in enumerate(tracks['items']):
                 track = item['track']
                 st.write(f"{i + 1}. {track['name']} - {track['artists'][0]['name']}")
 
-
-
         tab1, tab2, tab3 = st.tabs(["📊 Statistics", "ℹ️ Artist Info", "⭐ Recommendation"])
         with tab1:
-
-
-            with st.container(border=True):
+            with st.container():
                 col1, col2 = st.columns(2)
                 with col1:
-                    # bpm graph
+                    # BPM graph
                     st.write("Beats Per Minute (BPM):")
-                    track_ids = [item['track']['id'] for item in tracks['items'] if item['track']['id']]
-                    audio_features_list = sp.audio_features(track_ids)
                     tempo_data = {item['track']['name']: feature['tempo'] for item, feature in
                                   zip(tracks['items'], audio_features_list) if feature}
                     if tempo_data:
@@ -111,10 +177,8 @@ def main():
                         st.warning("No tempo data available for the selected tracks.")
 
                 with col2:
-                    # genre graph
+                    # Genre graph
                     st.write("Songs By Genre:")
-                    artist_ids = {item['track']['artists'][0]['id'] for item in tracks['items'] if item['track']['artists']}
-                    artists_data = [sp.artist(artist_id) for artist_id in artist_ids]
                     genre_counts = Counter(genre for artist in artists_data for genre in artist['genres'])
                     if genre_counts:
                         st.bar_chart(data=genre_counts)
@@ -124,7 +188,7 @@ def main():
             # Audio feature trends chart
             st.write("Song Features:")
             feature_options = ['valence', 'energy', 'danceability', 'loudness', 'tempo']
-            selected_features = st.multiselect('Select features to plot', feature_options, default=['valence', 'energy','danceability'])
+            selected_features = st.multiselect('Select features to plot', feature_options, default=['valence', 'energy', 'danceability'])
             features_data = {feature: [] for feature in selected_features}
             track_names = [item['track']['name'] for item in tracks['items']]
             for features in audio_features_list:
@@ -139,8 +203,7 @@ def main():
             else:
                 st.warning("No audio feature data available for the selected tracks.")
 
-            # interactive data table
-
+            # Interactive data table
             if st.checkbox("Show advanced track statistics"):
                 data = {
                     'Track Name': [item['track']['name'] for item in tracks['items']],
@@ -162,7 +225,7 @@ def main():
                 st.dataframe(track_dataframe)
 
         with tab2:
-            with st.container(border=True):
+            with st.container():
                 col1, col2 = st.columns(2)
                 with col1:
                     # Artists and their genres
@@ -175,18 +238,10 @@ def main():
                     st.dataframe(artist_genres_dataframe, height=400)
 
                 with col2:
-                    playlists = sp.current_user_playlists(limit=50)
-                    playlist_names = [playlist['name'] for playlist in playlists['items']]
-                    playlist_ids = [playlist['id'] for playlist in playlists['items']]
-                    #playlist_selection = st.selectbox('Select a Playlist', playlist_names)
-                    selected_playlist_id = playlist_ids[playlist_names.index(playlist_selection)]
-                    tracks = sp.playlist_tracks(selected_playlist_id)
-                    artist_ids = {item['track']['artists'][0]['id'] for item in tracks['items'] if item['track']['artists']}
-                    artists_data = [sp.artist(artist_id) for artist_id in artist_ids]
-
                     # Map display
                     st.write("Artist Locations Map:")
-                    artist_map = create_artist_map(artists_data)
+                    with st.spinner('Loading artist map...'):
+                        artist_map = create_artist_map(artists_data)
                     if artist_map:
                         st_folium(artist_map, height=400)  # Show the map
                     else:
@@ -194,15 +249,13 @@ def main():
 
         with tab3:
             # Recommendation feature
-
-            col1, col2= st.columns(2)
+            col1, col2 = st.columns(2)
             with col1:
-                with st.container(border=True, height= 570):
+                with st.container():
                     st.subheader("Generate Song Recommendations Based on Playlist")
                     playlist_name = st.text_input("Enter Playlist Name:")
                     playlist_image = st.file_uploader("Upload Playlist Image", type=['jpg', 'png'])
                     num_songs = st.slider("Select number of songs:", 1, 25, 5)
-
 
                     if st.button('Create Playlist'):
                         if not playlist_name:
@@ -210,25 +263,37 @@ def main():
                         elif not playlist_image:
                             st.error("Please upload an image for the playlist.")
                         else:
-                            seed_tracks = [track['track']['id'] for track in tracks['items']][
-                                          :5]  # Use first 5 tracks as seeds
+                            seed_tracks = [track['track']['id'] for track in tracks['items']][:5]  # Use first 5 tracks as seeds
                             recommended_songs = get_recommendations(seed_tracks, num_songs)
 
-
                             with col2:
-                                with st.container(border=True, height=570):
+                                with st.container():
                                     image = Image.open(playlist_image)
-                                    st.image(image)
+                                    vinyl_image = make_vinyl_image(image)
+                                    st.image(vinyl_image)
                                     st.subheader(playlist_name)
                                     st.write("Recommended Songs:")
 
                                     for i, song in enumerate(recommended_songs):
                                         st.write(f"{i + 1}. {song}")
 
-                                    # for song in recommended_songs:
-                                    #     st.write(song)
+@st.cache_data
+def get_playlists(_sp):
+    return _sp.current_user_playlists(limit=50)
 
+@st.cache_data
+def get_playlist_tracks(_sp, playlist_id):
+    return _sp.playlist_tracks(playlist_id)
 
+@st.cache_data
+def get_audio_features(_sp, track_ids):
+    return _sp.audio_features(track_ids)
+
+@st.cache_data
+def get_artist_data(_sp, artist_ids):
+    return [_sp.artist(artist_id) for artist_id in artist_ids]
+
+@st.cache_data
 def get_artist_city(artist_name):
     try:
         result = musicbrainzngs.search_artists(artist=artist_name, limit=1)
@@ -244,6 +309,18 @@ def get_artist_city(artist_name):
         print(f"Unexpected error: {e}")
         return None
 
+@st.cache_data
+def geocode_city(city_name):
+    try:
+        geocode_result = gmaps.geocode(city_name)
+        if geocode_result:
+            location = geocode_result[0]['geometry']['location']
+            return (location['lat'], location['lng'])
+        else:
+            print(f"No results for {city_name}")  # Debugging output
+    except Exception as e:
+        print(f"Error geocoding {city_name}: {e}")
+    return (None, None)  # Ensure two values are always returned
 
 def create_artist_map(artist_data):
     artist_map = folium.Map(location=[20, 0], zoom_start=2)
@@ -258,21 +335,6 @@ def create_artist_map(artist_data):
         else:
             print(f"City not found for {artist['name']}")
     return artist_map
-
-
-def geocode_city(city_name):
-    try:
-        geocode_result = gmaps.geocode(city_name)
-        if geocode_result:
-            location = geocode_result[0]['geometry']['location']
-            return (location['lat'], location['lng'])
-        else:
-            print(f"No results for {city_name}")  # Debugging output
-    except Exception as e:
-        print(f"Error geocoding {city_name}: {e}")
-    return (None, None)  # Ensure two values are always returned
-
-
 
 if __name__ == "__main__":
     main()
