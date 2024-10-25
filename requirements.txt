@@ -4,4 +4,4 @@ folium
 streamlit-folium
 googlemaps
 musicbrainzngs
-dotenv
+python-dotenv
