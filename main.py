@@ -13,6 +13,10 @@ st.set_page_config(
     layout="wide"
 )
 
+# Initialize session state for token_info
+if 'token_info' not in st.session_state:
+    st.session_state['token_info'] = None
+
 # Load environment variables
 from dotenv import load_dotenv
 load_dotenv()  # Load variables from a .env file
@@ -151,10 +155,6 @@ def create_artist_map(artist_data):
     return artist_map
 
 def main():
-    # Initialize session state for token_info
-    if 'token_info' not in st.session_state:
-        st.session_state['token_info'] = None
-
     # Handle authentication
     if not st.session_state['token_info']:
         url = st.experimental_get_query_params()
