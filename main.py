@@ -31,48 +31,39 @@ from streamlit_folium import st_folium
 import googlemaps
 import musicbrainzngs
 
-# Define the scope and Spotify OAuth
-scope = 'user-library-read playlist-read-private'
-
-client_id = os.getenv('SPOTIPY_CLIENT_ID')
-client_secret = os.getenv('SPOTIPY_CLIENT_SECRET')
-redirect_uri = os.getenv('SPOTIPY_REDIRECT_URI')  # Should be set to your deployed app's URL
-
-oauth = SpotifyOAuth(
-    client_id=client_id,
-    client_secret=client_secret,
-    redirect_uri=redirect_uri,
-    scope=scope,
-    show_dialog=True
-    # Removed cache_path to prevent shared token storage
-)
-
 # Initialize Google Maps and MusicBrainz clients
 gmaps_api_key = os.getenv('GMAPS_API_KEY')
 gmaps = googlemaps.Client(key=gmaps_api_key)
 musicbrainzngs.set_useragent("SpotifyAnalyzer", "0.1", "your_email@example.com")
 
 @st.cache_data
-def get_recommendations(seed_tracks, num_tracks):
+def get_recommendations(client_id, client_secret, redirect_uri, scope, seed_tracks, num_tracks):
+    oauth = SpotifyOAuth(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        scope=scope,
+        show_dialog=True
+    )
     sp = spotipy.Spotify(auth_manager=oauth)
     recommendations = sp.recommendations(seed_tracks=seed_tracks, limit=num_tracks)
     return [track['name'] + ' - ' + track['artists'][0]['name'] for track in recommendations['tracks']]
 
 @st.cache_data
-def get_playlists(_sp):
-    return _sp.current_user_playlists(limit=50)
+def get_playlists(sp):
+    return sp.current_user_playlists(limit=50)
 
 @st.cache_data
-def get_playlist_tracks(_sp, playlist_id):
-    return _sp.playlist_tracks(playlist_id)
+def get_playlist_tracks(sp, playlist_id):
+    return sp.playlist_tracks(playlist_id)
 
 @st.cache_data
-def get_audio_features(_sp, track_ids):
-    return _sp.audio_features(track_ids)
+def get_audio_features(sp, track_ids):
+    return sp.audio_features(track_ids)
 
 @st.cache_data
-def get_artist_data(_sp, artist_ids):
-    return [_sp.artist(artist_id) for artist_id in artist_ids]
+def get_artist_data(sp, artist_ids):
+    return [sp.artist(artist_id) for artist_id in artist_ids]
 
 @st.cache_data
 def get_artist_city(artist_name):
@@ -91,7 +82,7 @@ def get_artist_city(artist_name):
         return None
 
 @st.cache_data
-def geocode_city(city_name):
+def geocode_city(gmaps, city_name):
     try:
         geocode_result = gmaps.geocode(city_name)
         if geocode_result:
@@ -140,12 +131,12 @@ def make_vinyl_image(img):
 
     return background
 
-def create_artist_map(artist_data):
+def create_artist_map(artists_data, gmaps):
     artist_map = folium.Map(location=[20, 0], zoom_start=2)
-    for artist in artist_data:
+    for artist in artists_data:
         artist_city = get_artist_city(artist['name'])
         if artist_city:
-            lat, lon = geocode_city(artist_city)
+            lat, lon = geocode_city(gmaps, artist_city)
             if lat and lon:
                 folium.Marker([lat, lon], popup=f"{artist['name']}<br>{artist_city}").add_to(artist_map)
             else:
@@ -155,6 +146,22 @@ def create_artist_map(artist_data):
     return artist_map
 
 def main():
+    # Define the scope and Spotify OAuth inside the main function
+    scope = 'user-library-read playlist-read-private'
+
+    client_id = os.getenv('SPOTIPY_CLIENT_ID')
+    client_secret = os.getenv('SPOTIPY_CLIENT_SECRET')
+    redirect_uri = os.getenv('SPOTIPY_REDIRECT_URI')  # Should be set to your deployed app's URL
+
+    oauth = SpotifyOAuth(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        scope=scope,
+        show_dialog=True
+        # Removed cache_path to prevent shared token storage
+    )
+
     # Handle authentication
     if not st.session_state['token_info']:
         url = st.experimental_get_query_params()
@@ -215,7 +222,7 @@ def main():
 
         # Fetch playlists once
         try:
-            playlists = get_playlists(_sp=sp)
+            playlists = get_playlists(sp)
         except spotipy.exceptions.SpotifyException as e:
             st.error(f"Failed to fetch playlists: {e}")
             st.stop()
@@ -226,11 +233,11 @@ def main():
 
         # Get the selected playlist ID and fetch tracks
         selected_playlist_id = playlist_ids[playlist_names.index(playlist_selection)]
-        tracks = get_playlist_tracks(_sp=sp, playlist_id=selected_playlist_id)
+        tracks = get_playlist_tracks(sp, selected_playlist_id)
         track_ids = [item['track']['id'] for item in tracks['items'] if item['track']['id']]
         artist_ids = {item['track']['artists'][0]['id'] for item in tracks['items'] if item['track']['artists']}
-        artists_data = get_artist_data(_sp=sp, artist_ids=artist_ids)
-        audio_features_list = get_audio_features(_sp=sp, track_ids=track_ids)
+        artists_data = get_artist_data(sp, artist_ids)
+        audio_features_list = get_audio_features(sp, track_ids)
 
         # Display tracks in the playlist
         with st.sidebar:
@@ -244,6 +251,7 @@ def main():
                 st.write(f"{i + 1}. {track['name']} - {track['artists'][0]['name']}")
 
         tab1, tab2, tab3 = st.tabs(["📊 Statistics", "ℹ️ Artist Info", "⭐ Recommendation"])
+
         with tab1:
             with st.container():
                 col1, col2 = st.columns(2)
@@ -322,7 +330,7 @@ def main():
                     # Map display
                     st.write("Artist Locations Map:")
                     with st.spinner('Loading artist map...'):
-                        artist_map = create_artist_map(artists_data)
+                        artist_map = create_artist_map(artists_data, gmaps)
                     if artist_map:
                         st_folium(artist_map, height=400)  # Show the map
                     else:
@@ -344,8 +352,8 @@ def main():
                         elif not playlist_image:
                             st.error("Please upload an image for the playlist.")
                         else:
-                            seed_tracks = [track['track']['id'] for track in tracks['items']][:5]  # Use first 5 tracks as seeds
-                            recommended_songs = get_recommendations(seed_tracks, num_songs)
+                            seed_tracks = [track['id'] for track in track_ids][:5]  # Use first 5 tracks as seeds
+                            recommended_songs = get_recommendations(client_id, client_secret, redirect_uri, scope, seed_tracks, num_songs)
 
                             with col2:
                                 with st.container():
