@@ -4,9 +4,6 @@ warnings.filterwarnings("ignore")  # Suppress all warnings
 import os
 os.environ['PYTHONWARNINGS'] = 'ignore'  # Suppress warnings via environment variable
 
-import logging
-logging.getLogger("root").setLevel(logging.ERROR)  # Suppress logging messages
-
 import streamlit as st
 st.set_option('deprecation.showPyplotGlobalUse', False)
 
@@ -176,11 +173,18 @@ def main():
             auth_url = oauth.get_authorize_url()
             st.title("Spotify Playlist Analyzer")
             st.info("To test this app, you can login with the login and password: spotifyrectest@gmail.com")
-            # Replace the button with a clickable link styled as a button
+            # Updated login button that opens in a new tab/window
             st.markdown(
                 f'''
-                <a href="{auth_url}" target="_self">
-                    <button style="font-size:16px; padding:10px 20px; color:white; background-color:#1DB954; border:none; border-radius:25px; cursor:pointer;">
+                <a href="{auth_url}" target="_blank">
+                    <button style="
+                        font-size:16px; 
+                        padding:10px 20px; 
+                        color:white; 
+                        background-color:#1DB954; 
+                        border:none; 
+                        border-radius:25px; 
+                        cursor:pointer;">
                         Login with Spotify
                     </button>
                 </a>
