@@ -1,11 +1,11 @@
 import warnings
-warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore")  # Suppress all warnings
 
 import os
-os.environ['PYTHONWARNINGS'] = 'ignore'
+os.environ['PYTHONWARNINGS'] = 'ignore'  # Suppress warnings via environment variable
 
 import logging
-logging.getLogger("root").setLevel(logging.ERROR)
+logging.getLogger("root").setLevel(logging.ERROR)  # Suppress logging messages
 
 import streamlit as st
 st.set_option('deprecation.showPyplotGlobalUse', False)
@@ -35,7 +35,7 @@ scope = 'user-library-read playlist-read-private'
 
 client_id = os.getenv('SPOTIPY_CLIENT_ID')
 client_secret = os.getenv('SPOTIPY_CLIENT_SECRET')
-redirect_uri = os.getenv('SPOTIPY_REDIRECT_URI')
+redirect_uri = os.getenv('SPOTIPY_REDIRECT_URI')  # Should be set to your deployed app's URL
 
 oauth = SpotifyOAuth(
     client_id=client_id,
@@ -56,6 +56,51 @@ def get_recommendations(seed_tracks, num_tracks):
     sp = spotipy.Spotify(auth_manager=oauth)
     recommendations = sp.recommendations(seed_tracks=seed_tracks, limit=num_tracks)
     return [track['name'] + ' - ' + track['artists'][0]['name'] for track in recommendations['tracks']]
+
+@st.cache_data
+def get_playlists(_sp):
+    return _sp.current_user_playlists(limit=50)
+
+@st.cache_data
+def get_playlist_tracks(_sp, playlist_id):
+    return _sp.playlist_tracks(playlist_id)
+
+@st.cache_data
+def get_audio_features(_sp, track_ids):
+    return _sp.audio_features(track_ids)
+
+@st.cache_data
+def get_artist_data(_sp, artist_ids):
+    return [_sp.artist(artist_id) for artist_id in artist_ids]
+
+@st.cache_data
+def get_artist_city(artist_name):
+    try:
+        result = musicbrainzngs.search_artists(artist=artist_name, limit=1)
+        if result['artist-list']:
+            artist = result['artist-list'][0]
+            if 'begin-area' in artist:
+                return artist['begin-area'].get('name')
+        return None
+    except musicbrainzngs.WebServiceError as e:
+        print(f"MusicBrainz error: {e}")
+        return None
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        return None
+
+@st.cache_data
+def geocode_city(city_name):
+    try:
+        geocode_result = gmaps.geocode(city_name)
+        if geocode_result:
+            location = geocode_result[0]['geometry']['location']
+            return (location['lat'], location['lng'])
+        else:
+            print(f"No results for {city_name}")  # Debugging output
+    except Exception as e:
+        print(f"Error geocoding {city_name}: {e}")
+    return (None, None)  # Ensure two values are always returned
 
 def make_vinyl_image(img):
     # Resize the image to a square
@@ -94,6 +139,20 @@ def make_vinyl_image(img):
 
     return background
 
+def create_artist_map(artist_data):
+    artist_map = folium.Map(location=[20, 0], zoom_start=2)
+    for artist in artist_data:
+        artist_city = get_artist_city(artist['name'])
+        if artist_city:
+            lat, lon = geocode_city(artist_city)
+            if lat and lon:
+                folium.Marker([lat, lon], popup=f"{artist['name']}<br>{artist_city}").add_to(artist_map)
+            else:
+                print(f"Geocoding failed for {artist_city}")
+        else:
+            print(f"City not found for {artist['name']}")
+    return artist_map
+
 def main():
     # Handle authentication
     token_info = oauth.get_cached_token()
@@ -117,9 +176,17 @@ def main():
             auth_url = oauth.get_authorize_url()
             st.title("Spotify Playlist Analyzer")
             st.info("To test this app, you can login with the login and password: spotifyrectest@gmail.com")
-            if st.button('Login with Spotify'):
-                st.write(f'<meta http-equiv="refresh" content="0; url={auth_url}">', unsafe_allow_html=True)
-                st.stop()
+            # Replace the button with a clickable link styled as a button
+            st.markdown(
+                f'''
+                <a href="{auth_url}" target="_self">
+                    <button style="font-size:16px; padding:10px 20px; color:white; background-color:#1DB954; border:none; border-radius:25px; cursor:pointer;">
+                        Login with Spotify
+                    </button>
+                </a>
+                ''',
+                unsafe_allow_html=True
+            )
             st.stop()
 
     if token_info:
@@ -163,6 +230,7 @@ def main():
                 st.write(f"{i + 1}. {track['name']} - {track['artists'][0]['name']}")
 
         tab1, tab2, tab3 = st.tabs(["📊 Statistics", "ℹ️ Artist Info", "⭐ Recommendation"])
+
         with tab1:
             with st.container():
                 col1, col2 = st.columns(2)
@@ -276,65 +344,6 @@ def main():
 
                                     for i, song in enumerate(recommended_songs):
                                         st.write(f"{i + 1}. {song}")
-
-@st.cache_data
-def get_playlists(_sp):
-    return _sp.current_user_playlists(limit=50)
-
-@st.cache_data
-def get_playlist_tracks(_sp, playlist_id):
-    return _sp.playlist_tracks(playlist_id)
-
-@st.cache_data
-def get_audio_features(_sp, track_ids):
-    return _sp.audio_features(track_ids)
-
-@st.cache_data
-def get_artist_data(_sp, artist_ids):
-    return [_sp.artist(artist_id) for artist_id in artist_ids]
-
-@st.cache_data
-def get_artist_city(artist_name):
-    try:
-        result = musicbrainzngs.search_artists(artist=artist_name, limit=1)
-        if result['artist-list']:
-            artist = result['artist-list'][0]
-            if 'begin-area' in artist:
-                return artist['begin-area'].get('name')
-        return None
-    except musicbrainzngs.WebServiceError as e:
-        print(f"MusicBrainz error: {e}")
-        return None
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-        return None
-
-@st.cache_data
-def geocode_city(city_name):
-    try:
-        geocode_result = gmaps.geocode(city_name)
-        if geocode_result:
-            location = geocode_result[0]['geometry']['location']
-            return (location['lat'], location['lng'])
-        else:
-            print(f"No results for {city_name}")  # Debugging output
-    except Exception as e:
-        print(f"Error geocoding {city_name}: {e}")
-    return (None, None)  # Ensure two values are always returned
-
-def create_artist_map(artist_data):
-    artist_map = folium.Map(location=[20, 0], zoom_start=2)
-    for artist in artist_data:
-        artist_city = get_artist_city(artist['name'])
-        if artist_city:
-            lat, lon = geocode_city(artist_city)
-            if lat and lon:
-                folium.Marker([lat, lon], popup=f"{artist['name']}<br>{artist_city}").add_to(artist_map)
-            else:
-                print(f"Geocoding failed for {artist_city}")
-        else:
-            print(f"City not found for {artist['name']}")
-    return artist_map
 
 if __name__ == "__main__":
     main()
