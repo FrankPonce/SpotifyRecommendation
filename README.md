@@ -29,11 +29,11 @@ The application includes the following features:
 
 ## Video Walkthrough
 
-</img src='./misc/login.gif'>
+<img src='./misc/login.gif'>
 
-</img src='./misc/map.gif'>
+<img src='./misc/map.gif'>
 
-</img src='./misc/playlist.gif'>
+<img src='./misc/playlist.gif'>
 
 ## License
 
