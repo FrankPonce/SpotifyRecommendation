@@ -39,8 +39,8 @@ oauth = SpotifyOAuth(
     client_secret=client_secret,
     redirect_uri=redirect_uri,
     scope=scope,
-    show_dialog=True,
-    cache_path='token.txt'
+    show_dialog=True
+    # Removed cache_path to prevent shared token storage
 )
 
 # Initialize Google Maps and MusicBrainz clients
@@ -151,9 +151,12 @@ def create_artist_map(artist_data):
     return artist_map
 
 def main():
+    # Initialize session state for token_info
+    if 'token_info' not in st.session_state:
+        st.session_state['token_info'] = None
+
     # Handle authentication
-    token_info = oauth.get_cached_token()
-    if not token_info:
+    if not st.session_state['token_info']:
         url = st.experimental_get_query_params()
         if 'code' not in st.session_state:
             if 'code' in url:
@@ -162,6 +165,7 @@ def main():
         if 'code' in st.session_state:
             try:
                 token_info = oauth.get_access_token(st.session_state['code'])
+                st.session_state['token_info'] = token_info  # Store token_info in session state
                 st.experimental_set_query_params()  # Clear URL parameters after handling
                 st.success('Logged in successfully!')
                 del st.session_state['code']  # Clear code from session state after successful authentication
@@ -193,13 +197,19 @@ def main():
             )
             st.stop()
 
-    if token_info:
-        sp = spotipy.Spotify(auth=token_info['access_token'])
+    # If token_info is present, proceed with the app
+    if st.session_state['token_info']:
+        try:
+            sp = spotipy.Spotify(auth=st.session_state['token_info']['access_token'])
+        except spotipy.exceptions.SpotifyException as e:
+            st.error(f"Spotify error: {e}")
+            st.session_state['token_info'] = None  # Reset token_info
+            st.stop()
+
         st.success('Logged in with Spotify')
 
         if st.button('Logout'):
-            if os.path.exists('token.txt'):
-                os.remove('token.txt')
+            st.session_state['token_info'] = None  # Clear token_info from session state
             st.success('Logged out successfully. Please refresh the page to log in again.')
             st.stop()
 
@@ -234,7 +244,6 @@ def main():
                 st.write(f"{i + 1}. {track['name']} - {track['artists'][0]['name']}")
 
         tab1, tab2, tab3 = st.tabs(["📊 Statistics", "ℹ️ Artist Info", "⭐ Recommendation"])
-
         with tab1:
             with st.container():
                 col1, col2 = st.columns(2)
