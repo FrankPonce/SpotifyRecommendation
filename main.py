@@ -37,12 +37,12 @@ gmaps = googlemaps.Client(key=gmaps_api_key)
 musicbrainzngs.set_useragent("SpotifyAnalyzer", "0.1", "your_email@example.com")
 
 @st.cache_data
-def get_recommendations(client_id, client_secret, redirect_uri, scope, seed_tracks, num_tracks):
+def get_recommendations(_client_id, _client_secret, _redirect_uri, _scope, seed_tracks, num_tracks):
     oauth = SpotifyOAuth(
-        client_id=client_id,
-        client_secret=client_secret,
-        redirect_uri=redirect_uri,
-        scope=scope,
+        client_id=_client_id,
+        client_secret=_client_secret,
+        redirect_uri=_redirect_uri,
+        scope=_scope,
         show_dialog=True
     )
     sp = spotipy.Spotify(auth_manager=oauth)
@@ -50,20 +50,20 @@ def get_recommendations(client_id, client_secret, redirect_uri, scope, seed_trac
     return [track['name'] + ' - ' + track['artists'][0]['name'] for track in recommendations['tracks']]
 
 @st.cache_data
-def get_playlists(sp):
-    return sp.current_user_playlists(limit=50)
+def get_playlists(_sp):
+    return _sp.current_user_playlists(limit=50)
 
 @st.cache_data
-def get_playlist_tracks(sp, playlist_id):
-    return sp.playlist_tracks(playlist_id)
+def get_playlist_tracks(_sp, playlist_id):
+    return _sp.playlist_tracks(playlist_id)
 
 @st.cache_data
-def get_audio_features(sp, track_ids):
-    return sp.audio_features(track_ids)
+def get_audio_features(_sp, track_ids):
+    return _sp.audio_features(track_ids)
 
 @st.cache_data
-def get_artist_data(sp, artist_ids):
-    return [sp.artist(artist_id) for artist_id in artist_ids]
+def get_artist_data(_sp, artist_ids):
+    return [_sp.artist(artist_id) for artist_id in artist_ids]
 
 @st.cache_data
 def get_artist_city(artist_name):
@@ -82,9 +82,9 @@ def get_artist_city(artist_name):
         return None
 
 @st.cache_data
-def geocode_city(gmaps, city_name):
+def geocode_city(_gmaps, city_name):
     try:
-        geocode_result = gmaps.geocode(city_name)
+        geocode_result = _gmaps.geocode(city_name)
         if geocode_result:
             location = geocode_result[0]['geometry']['location']
             return (location['lat'], location['lng'])
@@ -131,12 +131,12 @@ def make_vinyl_image(img):
 
     return background
 
-def create_artist_map(artists_data, gmaps):
+def create_artist_map(artists_data, _gmaps):
     artist_map = folium.Map(location=[20, 0], zoom_start=2)
     for artist in artists_data:
         artist_city = get_artist_city(artist['name'])
         if artist_city:
-            lat, lon = geocode_city(gmaps, artist_city)
+            lat, lon = geocode_city(_gmaps, artist_city)
             if lat and lon:
                 folium.Marker([lat, lon], popup=f"{artist['name']}<br>{artist_city}").add_to(artist_map)
             else:
@@ -222,7 +222,7 @@ def main():
 
         # Fetch playlists once
         try:
-            playlists = get_playlists(sp)
+            playlists = get_playlists(_sp=sp)
         except spotipy.exceptions.SpotifyException as e:
             st.error(f"Failed to fetch playlists: {e}")
             st.stop()
@@ -233,11 +233,11 @@ def main():
 
         # Get the selected playlist ID and fetch tracks
         selected_playlist_id = playlist_ids[playlist_names.index(playlist_selection)]
-        tracks = get_playlist_tracks(sp, selected_playlist_id)
+        tracks = get_playlist_tracks(_sp=sp, playlist_id=selected_playlist_id)
         track_ids = [item['track']['id'] for item in tracks['items'] if item['track']['id']]
         artist_ids = {item['track']['artists'][0]['id'] for item in tracks['items'] if item['track']['artists']}
-        artists_data = get_artist_data(sp, artist_ids)
-        audio_features_list = get_audio_features(sp, track_ids)
+        artists_data = get_artist_data(_sp=sp, artist_ids=artist_ids)
+        audio_features_list = get_audio_features(_sp=sp, track_ids=track_ids)
 
         # Display tracks in the playlist
         with st.sidebar:
@@ -330,7 +330,7 @@ def main():
                     # Map display
                     st.write("Artist Locations Map:")
                     with st.spinner('Loading artist map...'):
-                        artist_map = create_artist_map(artists_data, gmaps)
+                        artist_map = create_artist_map(artists_data, _gmaps=gmaps)
                     if artist_map:
                         st_folium(artist_map, height=400)  # Show the map
                     else:
@@ -353,7 +353,14 @@ def main():
                             st.error("Please upload an image for the playlist.")
                         else:
                             seed_tracks = [track['id'] for track in track_ids][:5]  # Use first 5 tracks as seeds
-                            recommended_songs = get_recommendations(client_id, client_secret, redirect_uri, scope, seed_tracks, num_songs)
+                            recommended_songs = get_recommendations(
+                                _client_id=client_id,
+                                _client_secret=client_secret,
+                                _redirect_uri=redirect_uri,
+                                _scope=scope,
+                                seed_tracks=seed_tracks,
+                                num_tracks=num_songs
+                            )
 
                             with col2:
                                 with st.container():
